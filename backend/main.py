@@ -40,21 +40,26 @@ class BookmarkRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """啟動時建立 tunnel 和連線，關閉時清理"""
+    """啟動時嘗試連線，失敗也不阻止 server 啟動"""
     try:
         address, port = tunnel.start()
         await location.connect(address, port)
-        logger.info("WarpPin 啟動完成")
+        logger.info("WarpPin 啟動完成（裝置已連線）")
     except Exception as e:
-        logger.error(f"啟動失敗：{e}")
-        tunnel.stop()
-        raise
+        logger.warning(f"裝置未連線：{e}")
+        logger.info("WarpPin 啟動完成（等待裝置連線）")
 
     yield
 
     if location.is_spoofing:
-        await location.clear_location()
-    await location.disconnect()
+        try:
+            await location.clear_location()
+        except Exception:
+            pass
+    try:
+        await location.disconnect()
+    except Exception:
+        pass
     tunnel.stop()
     logger.info("WarpPin 已關閉")
 
@@ -86,6 +91,21 @@ async def api_status():
         "spoofing": location.is_spoofing,
         "position": location.current_position,
     }
+
+
+@app.post("/api/connect")
+async def api_connect():
+    """手動連線裝置（接上 USB 後呼叫）"""
+    if tunnel.is_running and location.is_connected:
+        return {"status": "ok", "message": "已連線"}
+    try:
+        tunnel.stop()
+        await location.disconnect()
+        address, port = tunnel.start()
+        await location.connect(address, port)
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.post("/api/teleport")

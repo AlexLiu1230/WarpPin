@@ -5,8 +5,15 @@ import sys
 import signal
 import time
 import logging
+import os
+import shutil
 
 logger = logging.getLogger(__name__)
+
+
+def _find_sudo():
+    """找到 sudo 路徑"""
+    return shutil.which("sudo") or "/usr/bin/sudo"
 
 
 class TunnelManager:
@@ -26,13 +33,30 @@ class TunnelManager:
 
         logger.info("正在建立 tunnel...")
 
+        # 檢查是否已經有 root 權限
+        is_root = os.geteuid() == 0
+
+        cmd = [
+            sys.executable, "-m", "pymobiledevice3",
+            "lockdown", "start-tunnel", "--script-mode",
+        ]
+
+        if not is_root:
+            # 沒有 root 權限，用 sudo 提權
+            # macOS 上如果是 GUI app，sudo 會透過系統提示要密碼
+            cmd = [_find_sudo(), "--askpass"] + cmd
+
+            # 設定 SUDO_ASKPASS 用 osascript 彈出密碼對話框
+            askpass_script = self._create_askpass_script()
+            env = {**os.environ, "SUDO_ASKPASS": askpass_script}
+        else:
+            env = None
+
         self._proc = subprocess.Popen(
-            [
-                sys.executable, "-m", "pymobiledevice3",
-                "lockdown", "start-tunnel", "--script-mode",
-            ],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=env,
         )
 
         deadline = time.time() + timeout
@@ -54,6 +78,19 @@ class TunnelManager:
 
         self._proc.kill()
         raise TimeoutError("Tunnel 啟動逾時")
+
+    def _create_askpass_script(self):
+        """建立 macOS 密碼輸入腳本（osascript）"""
+        import tempfile
+        script = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".sh", delete=False, prefix="warppin_askpass_"
+        )
+        script.write("""#!/bin/bash
+osascript -e 'Tell application "System Events" to display dialog "WarpPin 需要管理者權限來建立裝置連線" default answer "" with hidden answer with title "WarpPin" buttons {"取消","確定"} default button "確定"' -e 'text returned of result' 2>/dev/null
+""")
+        script.close()
+        os.chmod(script.name, 0o755)
+        return script.name
 
     def stop(self):
         """關閉 tunnel"""

@@ -302,8 +302,9 @@
                 <div class="section-label">裝置</div>
                 <div class="device-row">
                     <div class="dot off" id="dot"></div>
-                    <span id="device-text">連線中...</span>
+                    <span id="device-text">未連線</span>
                 </div>
+                <button class="btn btn-primary" id="connect-btn" onclick="connectDevice()" style="margin-top:8px;display:none;">連線裝置</button>
             </div>
 
             <!-- 目前位置 -->
@@ -423,16 +424,39 @@
             try {
                 const res = await fetch('/api/device');
                 const data = await res.json();
+                const connectBtn = document.getElementById('connect-btn');
                 if (data.connected) {
                     document.getElementById('dot').className = 'dot on';
                     document.getElementById('device-text').textContent = `${data.name} — iOS ${data.ios_version}`;
+                    connectBtn.style.display = 'none';
                 } else {
                     document.getElementById('dot').className = 'dot off';
                     document.getElementById('device-text').textContent = '未連線';
+                    connectBtn.style.display = 'block';
                 }
             } catch {
                 document.getElementById('device-text').textContent = '無法連線到 Server';
             }
+        }
+
+        async function connectDevice() {
+            const btn = document.getElementById('connect-btn');
+            btn.disabled = true;
+            btn.textContent = '連線中...';
+            try {
+                const res = await fetch('/api/connect', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    showToast('連線成功');
+                } else {
+                    showToast(`連線失敗：${data.message}`);
+                }
+            } catch {
+                showToast('連線失敗');
+            }
+            btn.disabled = false;
+            btn.textContent = '連線裝置';
+            await loadDevice();
         }
 
         // --- 狀態 UI ---
