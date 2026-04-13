@@ -1,4 +1,4 @@
-"""WarpPin 打包腳本 — 用 PyInstaller 打包成 macOS .app"""
+"""WarpPin 打包腳本 — 打包成 macOS 可執行檔"""
 
 import subprocess
 import sys
@@ -13,24 +13,19 @@ BUILD_DIR = PROJECT_DIR / "build"
 def main():
     print("=== WarpPin 打包開始 ===\n")
 
-    # 清理舊的 build
     for d in [DIST_DIR, BUILD_DIR]:
         if d.exists():
             shutil.rmtree(d)
             print(f"已清理 {d.name}/")
 
-    # PyInstaller 指令
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", "WarpPin",
-        "--windowed",                    # macOS .app bundle（不顯示終端機）
-        "--onedir",                      # 目錄模式（比 onefile 啟動快）
+        "--onedir",
         "--noconfirm",
-        # 加入 frontend
+        # 不用 --windowed，避免 macOS app bundle 自動重啟問題
         "--add-data", f"{PROJECT_DIR / 'frontend'}:frontend",
-        # 加入 backend 模組
         "--add-data", f"{PROJECT_DIR / 'backend'}:backend",
-        # hidden imports（PyInstaller 可能漏掉的）
         "--hidden-import", "pymobiledevice3",
         "--hidden-import", "uvicorn",
         "--hidden-import", "uvicorn.logging",
@@ -46,7 +41,6 @@ def main():
         "--hidden-import", "fastapi",
         "--hidden-import", "httpx",
         "--hidden-import", "webview",
-        # 入口
         str(PROJECT_DIR / "app.py"),
     ]
 
@@ -57,16 +51,29 @@ def main():
         print("\n打包失敗！")
         sys.exit(1)
 
-    app_path = DIST_DIR / "WarpPin.app"
-    if app_path.exists():
-        print(f"\n=== 打包成功！===")
-        print(f"輸出：{app_path}")
-        print(f"\n使用方式：")
-        print(f"  open {app_path}")
-    else:
-        # onedir 模式可能不會直接產生 .app
-        print(f"\n=== 打包完成 ===")
-        print(f"輸出在 {DIST_DIR}/")
+    warppin_dir = DIST_DIR / "WarpPin"
+    if not warppin_dir.exists():
+        print("\n找不到輸出目錄")
+        sys.exit(1)
+
+    # 建立啟動腳本
+    launcher = DIST_DIR / "WarpPin.command"
+    launcher.write_text("""#!/bin/bash
+# WarpPin 啟動腳本
+DIR="$(cd "$(dirname "$0")" && pwd)"
+"$DIR/WarpPin/WarpPin"
+""")
+    launcher.chmod(0o755)
+
+    size_mb = sum(f.stat().st_size for f in warppin_dir.rglob('*') if f.is_file()) / 1024 / 1024
+
+    print(f"\n=== 打包成功！===")
+    print(f"輸出：{warppin_dir}")
+    print(f"啟動腳本：{launcher}")
+    print(f"大小：{size_mb:.1f} MB")
+    print(f"\n使用方式：")
+    print(f"  {warppin_dir / 'WarpPin'}")
+    print(f"  或雙擊 {launcher}")
 
 
 if __name__ == "__main__":

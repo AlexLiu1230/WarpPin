@@ -1,18 +1,37 @@
-"""Tunnel 管理 — 自動啟動/關閉 pymobiledevice3 tunnel"""
+"""Tunnel 管理 — 用 subprocess 啟動 pymobiledevice3 tunnel"""
 
 import subprocess
-import sys
+import shutil
 import signal
 import time
 import logging
 import os
-import shutil
 
 logger = logging.getLogger(__name__)
 
 
+def _find_python():
+    """找到系統的 Python（不是打包後的）"""
+    # 常見路徑
+    candidates = [
+        "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
+        "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13",
+        "/usr/local/bin/python3",
+        "/opt/homebrew/bin/python3",
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+
+    # 用 which 找
+    result = shutil.which("python3")
+    if result:
+        return result
+
+    return "python3"
+
+
 def _find_sudo():
-    """找到 sudo 路徑"""
     return shutil.which("sudo") or "/usr/bin/sudo"
 
 
@@ -26,31 +45,27 @@ class TunnelManager:
     def is_running(self):
         return self._proc is not None and self._proc.poll() is None
 
-    def start(self, timeout=30):
+    def start(self, timeout=15):
         """啟動 tunnel，回傳 (address, port)"""
         if self.is_running:
             return self.address, self.port
 
         logger.info("正在建立 tunnel...")
 
-        # 檢查是否已經有 root 權限
+        python_path = _find_python()
         is_root = os.geteuid() == 0
 
         cmd = [
-            sys.executable, "-m", "pymobiledevice3",
+            python_path, "-m", "pymobiledevice3",
             "lockdown", "start-tunnel", "--script-mode",
         ]
 
-        if not is_root:
-            # 沒有 root 權限，用 sudo 提權
-            # macOS 上如果是 GUI app，sudo 會透過系統提示要密碼
-            cmd = [_find_sudo(), "--askpass"] + cmd
+        env = {**os.environ}
 
-            # 設定 SUDO_ASKPASS 用 osascript 彈出密碼對話框
-            askpass_script = self._create_askpass_script()
-            env = {**os.environ, "SUDO_ASKPASS": askpass_script}
-        else:
-            env = None
+        if not is_root:
+            askpass = self._create_askpass_script()
+            env["SUDO_ASKPASS"] = askpass
+            cmd = [_find_sudo(), "--askpass"] + cmd
 
         self._proc = subprocess.Popen(
             cmd,
@@ -80,14 +95,17 @@ class TunnelManager:
         raise TimeoutError("Tunnel 啟動逾時")
 
     def _create_askpass_script(self):
-        """建立 macOS 密碼輸入腳本（osascript）"""
+        """macOS 密碼輸入對話框"""
         import tempfile
         script = tempfile.NamedTemporaryFile(
             mode="w", suffix=".sh", delete=False, prefix="warppin_askpass_"
         )
-        script.write("""#!/bin/bash
-osascript -e 'Tell application "System Events" to display dialog "WarpPin 需要管理者權限來建立裝置連線" default answer "" with hidden answer with title "WarpPin" buttons {"取消","確定"} default button "確定"' -e 'text returned of result' 2>/dev/null
-""")
+        script.write('#!/bin/bash\n'
+            'osascript -e \'Tell application "System Events" to display dialog '
+            '"WarpPin 需要管理者權限來建立裝置連線" default answer "" '
+            'with hidden answer with title "WarpPin" '
+            'buttons {"取消","確定"} default button "確定"\' '
+            '-e \'text returned of result\' 2>/dev/null\n')
         script.close()
         os.chmod(script.name, 0o755)
         return script.name

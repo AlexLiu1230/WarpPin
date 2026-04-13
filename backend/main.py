@@ -10,7 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+import os as _os
+_base = _os.environ.get("WARPPIN_BASE_DIR", str(Path(__file__).resolve().parent.parent))
+FRONTEND_DIR = Path(_base) / "frontend"
 
 import httpx
 
@@ -41,12 +43,17 @@ class BookmarkRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """啟動時嘗試連線，失敗也不阻止 server 啟動"""
+    # 先快速檢查有沒有 USB 裝置，沒有就不嘗試建 tunnel（避免等 30 秒）
     try:
-        address, port = tunnel.start()
-        await location.connect(address, port)
-        logger.info("WarpPin 啟動完成（裝置已連線）")
+        info = await get_device_info()
+        if info:
+            address, port = tunnel.start(timeout=15)
+            await location.connect(address, port)
+            logger.info("WarpPin 啟動完成（裝置已連線）")
+        else:
+            logger.info("WarpPin 啟動完成（未偵測到裝置）")
     except Exception as e:
-        logger.warning(f"裝置未連線：{e}")
+        logger.warning(f"裝置連線失敗：{e}")
         logger.info("WarpPin 啟動完成（等待裝置連線）")
 
     yield
