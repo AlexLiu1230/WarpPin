@@ -473,10 +473,15 @@
             }
         }
 
+        // 經度標準化到 -180 ~ 180
+        function wrapLng(lng) {
+            return ((lng + 180) % 360 + 360) % 360 - 180;
+        }
+
         // --- 地圖點擊 ---
         map.on('click', function(e) {
             pendingLat = e.latlng.lat;
-            pendingLng = e.latlng.lng;
+            pendingLng = wrapLng(e.latlng.lng);
             document.getElementById('input-lat').value = pendingLat.toFixed(6);
             document.getElementById('input-lng').value = pendingLng.toFixed(6);
             if (previewMarker) map.removeLayer(previewMarker);
